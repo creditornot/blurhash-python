@@ -105,3 +105,9 @@ ENV/
 
 # Pipenv
 Pipfile.lock
+
+# macOS
+.DS_Store
+
+# PyCharm
+.idea/

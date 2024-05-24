@@ -59,3 +59,11 @@ Use `tox` to run test suite against all supported python versions
 ```
 $ tox
 ```
+
+Local Build
+-----------
+
+Build source distribution and wheels into `dist/` directory.
+```
+$ python -m build
+```

@@ -1,3 +1,57 @@
 [build-system]
-requires = ["setuptools", "wheel"]
-build-backend = "setuptools.build_meta:__legacy__"
+requires = ["setuptools>=64", "setuptools-scm>=8", "wheel", "cffi"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "blurhash-python"
+description = "BlurHash encoder implementation for Python"
+requires-python = ">=3.8"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Atte Lautanala", email = "atte.lautanala@wolt.com" }
+]
+dynamic = ["version"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "cffi",
+    "Pillow",
+    "six",
+]
+
+[project.optional-dependencies]
+testing = [
+    "pytest",
+]
+
+[project.urls]
+Homepage = "https://blurha.sh"
+Repository = "https://github.com/woltapp/blurhash-python"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["blurhash*"]
+
+[tool.setuptools_scm]
+version_file = "src/blurhash/_version.py"
+
+[tool.cibuildwheel]
+build-frontend = "build"
+# skip platforms
+#   pp*         - don't build any PyPy variations
+#   win32*      - don't build 32bit windows variations
+#   *_i686      - don't build 32bit linux variations
+#   *musllinux* - don't build musl linux variations
+skip = "pp* *-win32 *_i686 *musllinux*"
+test-requires = "pytest"
+test-command = "pytest {project}/tests"
