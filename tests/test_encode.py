@@ -13,11 +13,15 @@ def test_encode_file():
     assert result == 'LlMF%n00%#MwS|WCWEM{R*bbWBbH'
 
 
-def test_encode_pil_image():
+def test_encode_pil_image_twise():
     with Image.open('tests/pic2.png') as image:
-        result = encode(image, 4, 3)
+        image = image.convert('RGB')
+        result1 = encode(image, 4, 3)
+        # Should not raise second time
+        result2 = encode(image, 4, 3)
 
-    assert result == 'LlMF%n00%#MwS|WCWEM{R*bbWBbH'
+    assert result1 == result2
+    assert result1 == 'LlMF%n00%#MwS|WCWEM{R*bbWBbH'
 
 
 def test_encode_with_filename():

@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from enum import Enum
 
 from PIL import Image
@@ -25,13 +26,16 @@ class BlurhashDecodeError(Exception):
 
 
 def encode(image, x_components, y_components):
-    if not isinstance(image, Image.Image):
+    if isinstance(image, Image.Image):
+        image_context = nullcontext()
+    else:
         image = Image.open(image)
-    if image.mode != 'RGB':
-        image = image.convert('RGB')
-    rgb_data = image.tobytes()
-    width, height = image.size
-    image.close()
+        image_context = image
+    with image_context:
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+        rgb_data = image.tobytes()
+        width, height = image.size
 
     rgb = _ffi.new('uint8_t[]', rgb_data)
     bytes_per_row = _ffi.cast('size_t', width * 3)
