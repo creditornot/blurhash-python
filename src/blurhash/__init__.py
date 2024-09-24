@@ -1,18 +1,13 @@
-from __future__ import absolute_import
-from itertools import chain
-
+from enum import Enum
 
 from PIL import Image
-
-from six.moves import zip
-from enum import Enum
 
 from ._functions import ffi as _ffi, lib as _lib
 from ._version import version as __version__
 
 
-__all__ = 'encode', 'decode', 'is_valid_blurhash', 'PixelMode', \
-          'BlurhashDecodeError', '__version__'
+__all__ = ('encode', 'decode', 'is_valid_blurhash', 'PixelMode',
+           'BlurhashDecodeError', '__version__')
 
 
 class PixelMode(Enum):
@@ -34,10 +29,7 @@ def encode(image, x_components, y_components):
         image = Image.open(image)
     if image.mode != 'RGB':
         image = image.convert('RGB')
-    red_band = image.getdata(band=0)
-    green_band = image.getdata(band=1)
-    blue_band = image.getdata(band=2)
-    rgb_data = list(chain.from_iterable(zip(red_band, green_band, blue_band)))
+    rgb_data = image.tobytes()
     width, height = image.size
     image.close()
 
