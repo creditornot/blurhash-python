@@ -11,7 +11,7 @@ struct RGB {
 	float b;
 };
 
-static struct RGB multiplyBasisFunction(int xComponent, int yComponent, int width, int height, uint8_t *rgb, size_t bytesPerRow, float *cosx);
+static struct RGB multiplyBasisFunction(int xComponent, int yComponent, int width, int height, uint8_t *rgb, size_t bytesPerRow, float *cosx, float *cosy);
 static char *encode_int(int value, int length, char *destination);
 
 static int encodeDC(float r, float g, float b);
@@ -37,17 +37,32 @@ const char *blurHashForPixels(int xComponents, int yComponents, int width, int h
 
 	init_sRGBToLinear_cache();
 
-	float *cosx = (float *)malloc(sizeof(float) * width);
+	float *cosx = (float *)malloc(sizeof(float) * width * xComponents);
 	if (! cosx) return NULL;
+	float *cosy = (float *)malloc(sizeof(float) * height);
+	if (! cosy) {
+		free(cosx);
+		return NULL;
+	}
+	for(int x = 0; x < xComponents; x++) {
+		for(int i = 0; i < width; i++) {
+			cosx[x * width + i] = cosf(M_PI * x * i / width);
+		}
+	}
 	for(int y = 0; y < yComponents; y++) {
+		for(int i = 0; i < height; i++) {
+			cosy[i] = cosf(M_PI * y * i / height);
+		}
 		for(int x = 0; x < xComponents; x++) {
-			struct RGB factor = multiplyBasisFunction(x, y, width, height, rgb, bytesPerRow, cosx);
+			struct RGB factor = multiplyBasisFunction(x, y, width, height, rgb, bytesPerRow,
+				cosx + x * width, cosy);
 			factors[y * xComponents + x][0] = factor.r;
 			factors[y * xComponents + x][1] = factor.g;
 			factors[y * xComponents + x][2] = factor.b;
 		}
 	}
 	free(cosx);
+	free(cosy);
 
 	float *dc = factors[0];
 	float *ac = dc + 3;
@@ -83,19 +98,17 @@ const char *blurHashForPixels(int xComponents, int yComponents, int width, int h
 	return destination;
 }
 
-static struct RGB multiplyBasisFunction(int xComponent, int yComponent, int width, int height, uint8_t *rgb, size_t bytesPerRow, float *cosx) {
+static struct RGB multiplyBasisFunction(
+	int xComponent, int yComponent, int width, int height, uint8_t *rgb, size_t bytesPerRow,
+	float *cosx, float *cosy
+) {
 	struct RGB result = { 0, 0, 0 };
 	float normalisation = (xComponent == 0 && yComponent == 0) ? 1 : 2;
 
-	for(int x = 0; x < width; x++) {
-		cosx[x] = cosf(M_PI * xComponent * x / width);
-	}
-
 	for(int y = 0; y < height; y++) {
-		float cosy = cosf(M_PI * yComponent * y / height);
 		uint8_t *src = rgb + y * bytesPerRow;
 		for(int x = 0; x < width; x++) {
-			float basis = cosy * cosx[x];
+			float basis = cosy[y] * cosx[x];
 			result.r += basis * sRGBToLinear_cache[src[3 * x + 0]];
 			result.g += basis * sRGBToLinear_cache[src[3 * x + 1]];
 			result.b += basis * sRGBToLinear_cache[src[3 * x + 2]];
