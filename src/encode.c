@@ -11,7 +11,9 @@ struct RGB {
 	float b;
 };
 
-static struct RGB multiplyBasisFunction(int xComponent, int yComponent, int width, int height, uint8_t *rgb, size_t bytesPerRow, float *cosx, float *cosy);
+static void multiplyBasisFunction(
+	struct RGB *factors, int factorsCount, int width, int height, uint8_t *rgb, size_t bytesPerRow,
+	float *cosX, float *cosY);
 static char *encode_int(int value, int length, char *destination);
 
 static int encodeDC(float r, float g, float b);
@@ -33,40 +35,41 @@ const char *blurHashForPixels(int xComponents, int yComponents, int width, int h
 	if(xComponents < 1 || xComponents > 9) return NULL;
 	if(yComponents < 1 || yComponents > 9) return NULL;
 
-	float factors[9 * 9][3];
+	struct RGB factors[9 * 9] = {0};
+	int factorsCount = xComponents * yComponents;
 
 	init_sRGBToLinear_cache();
 
-	float *cosx = (float *)malloc(sizeof(float) * width * xComponents);
-	if (! cosx) return NULL;
-	float *cosy = (float *)malloc(sizeof(float) * height);
-	if (! cosy) {
-		free(cosx);
+	float *cosX = (float *)malloc(sizeof(float) * width * factorsCount);
+	if (! cosX) return NULL;
+	float *cosY = (float *)malloc(sizeof(float) * height * factorsCount);
+	if (! cosY) {
+		free(cosX);
 		return NULL;
 	}
-	for(int x = 0; x < xComponents; x++) {
-		for(int i = 0; i < width; i++) {
-			cosx[x * width + i] = cosf(M_PI * x * i / width);
-		}
-	}
-	for(int y = 0; y < yComponents; y++) {
-		for(int i = 0; i < height; i++) {
-			cosy[i] = cosf(M_PI * y * i / height);
-		}
+	for(int i = 0; i < width; i++) {
 		for(int x = 0; x < xComponents; x++) {
-			struct RGB factor = multiplyBasisFunction(x, y, width, height, rgb, bytesPerRow,
-				cosx + x * width, cosy);
-			factors[y * xComponents + x][0] = factor.r;
-			factors[y * xComponents + x][1] = factor.g;
-			factors[y * xComponents + x][2] = factor.b;
+			float weight = cosf(M_PI * x * i / width);
+			for(int y = 0; y < yComponents; y++) {
+				cosX[i * factorsCount + y * xComponents + x] = weight;
+			}
 		}
 	}
-	free(cosx);
-	free(cosy);
+	for(int i = 0; i < height; i++) {
+		for(int y = 0; y < yComponents; y++) {
+			float weight = cosf(M_PI * y * i / height);
+			for(int x = 0; x < xComponents; x++) {
+				cosY[i * factorsCount + y * xComponents + x] = weight;
+			}
+		}
+	}
+	multiplyBasisFunction(factors, factorsCount, width, height, rgb, bytesPerRow, cosX, cosY);
+	free(cosX);
+	free(cosY);
 
-	float *dc = factors[0];
+	float *dc = (float *)factors;
 	float *ac = dc + 3;
-	int acCount = xComponents * yComponents - 1;
+	int acCount = factorsCount - 1;
 	char *ptr = destination;
 
 	int sizeFlag = (xComponents - 1) + (yComponents - 1) * 9;
@@ -98,30 +101,35 @@ const char *blurHashForPixels(int xComponents, int yComponents, int width, int h
 	return destination;
 }
 
-static struct RGB multiplyBasisFunction(
-	int xComponent, int yComponent, int width, int height, uint8_t *rgb, size_t bytesPerRow,
-	float *cosx, float *cosy
+static void multiplyBasisFunction(
+	struct RGB *factors, int factorsCount, int width, int height, uint8_t *rgb, size_t bytesPerRow,
+	float *cosX, float *cosY
 ) {
-	struct RGB result = { 0, 0, 0 };
-	float normalisation = (xComponent == 0 && yComponent == 0) ? 1 : 2;
-
 	for(int y = 0; y < height; y++) {
 		uint8_t *src = rgb + y * bytesPerRow;
+		float *cosYLocal = cosY + y * factorsCount;
 		for(int x = 0; x < width; x++) {
-			float basis = cosy[y] * cosx[x];
-			result.r += basis * sRGBToLinear_cache[src[3 * x + 0]];
-			result.g += basis * sRGBToLinear_cache[src[3 * x + 1]];
-			result.b += basis * sRGBToLinear_cache[src[3 * x + 2]];
+			float pixel[3];
+			float *cosXLocal = cosX + x * factorsCount;
+			pixel[0] = sRGBToLinear_cache[src[3 * x + 0]];
+			pixel[1] = sRGBToLinear_cache[src[3 * x + 1]];
+			pixel[2] = sRGBToLinear_cache[src[3 * x + 2]];
+			for (int i = 0; i < factorsCount; i++) {
+				float basis = cosYLocal[i] * cosXLocal[i];
+				factors[i].r += basis * pixel[0];
+				factors[i].g += basis * pixel[1];
+				factors[i].b += basis * pixel[2];
+			}
 		}
 	}
 
-	float scale = normalisation / (width * height);
-
-	result.r *= scale;
-	result.g *= scale;
-	result.b *= scale;
-
-	return result;
+	for (int i = 0; i < factorsCount; i++) {
+		float normalisation = (i == 0) ? 1 : 2;
+		float scale = normalisation / (width * height);
+		factors[i].r *= scale;
+		factors[i].g *= scale;
+		factors[i].b *= scale;
+	}
 }
 
 static int encodeDC(float r, float g, float b) {
