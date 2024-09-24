@@ -33,12 +33,7 @@ const char *blurHashForPixels(int xComponents, int yComponents, int width, int h
 	if(xComponents < 1 || xComponents > 9) return NULL;
 	if(yComponents < 1 || yComponents > 9) return NULL;
 
-#ifndef _MSC_VER
-	float factors[yComponents * xComponents][3];
-#else
 	float factors[9 * 9][3];
-#endif
-	memset(factors, 0, sizeof(factors));
 
 	init_sRGBToLinear_cache();
 
