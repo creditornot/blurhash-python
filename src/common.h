@@ -1,7 +1,7 @@
 #ifndef __BLURHASH_COMMON_H__
 #define __BLURHASH_COMMON_H__
 
-#include<math.h>
+#include <math.h>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -13,10 +13,10 @@ static inline int linearTosRGB(float value) {
 	else return (1.055 * powf(v, 1 / 2.4) - 0.055) * 255 + 0.5;
 }
 
-static inline float sRGBToLinear(int value) {
-	float v = (float)value / 255;
-	if(v <= 0.04045) return v / 12.92;
-	else return powf((v + 0.055) / 1.055, 2.4);
+static inline float sRGBToLinear(uint8_t value) {
+	float v = value * (1 / 255.0);
+	if(v <= 0.04045) return v * (1 / 12.92);
+	else return powf((v + 0.055) * (1 /1.055), 2.4);
 }
 
 static inline float signPow(float value, float exp) {
