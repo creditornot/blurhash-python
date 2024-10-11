@@ -5,14 +5,8 @@
 #include "common.h"
 
 
-struct RGB {
-	float r;
-	float g;
-	float b;
-};
-
 static void multiplyBasisFunction(
-	struct RGB *factors, int factorsCount, int width, int height, uint8_t *rgb, size_t bytesPerRow,
+	float factors[][4], int factorsCount, int width, int height, uint8_t *rgb, size_t bytesPerRow,
 	float *cosX, float *cosY);
 static char *encode_int(int value, int length, char *destination);
 
@@ -35,8 +29,9 @@ const char *blurHashForPixels(int xComponents, int yComponents, int width, int h
 	if(xComponents < 1 || xComponents > 9) return NULL;
 	if(yComponents < 1 || yComponents > 9) return NULL;
 
-	struct RGB factors[9 * 9] = {0};
+	float factors[yComponents * xComponents][4];
 	int factorsCount = xComponents * yComponents;
+	memset(factors, 0, sizeof(factors));
 
 	init_sRGBToLinear_cache();
 
@@ -67,8 +62,8 @@ const char *blurHashForPixels(int xComponents, int yComponents, int width, int h
 	free(cosX);
 	free(cosY);
 
-	float *dc = (float *)factors;
-	float *ac = dc + 3;
+	float *dc = factors[0];
+	float *ac = dc + 4;
 	int acCount = factorsCount - 1;
 	char *ptr = destination;
 
@@ -78,7 +73,7 @@ const char *blurHashForPixels(int xComponents, int yComponents, int width, int h
 	float maximumValue;
 	if(acCount > 0) {
 		float actualMaximumValue = 0;
-		for(int i = 0; i < acCount * 3; i++) {
+		for(int i = 0; i < acCount * 4; i++) {
 			actualMaximumValue = fmaxf(fabsf(ac[i]), actualMaximumValue);
 		}
 
@@ -93,7 +88,7 @@ const char *blurHashForPixels(int xComponents, int yComponents, int width, int h
 	ptr = encode_int(encodeDC(dc[0], dc[1], dc[2]), 4, ptr);
 
 	for(int i = 0; i < acCount; i++) {
-		ptr = encode_int(encodeAC(ac[i * 3 + 0], ac[i * 3 + 1], ac[i * 3 + 2], maximumValue), 2, ptr);
+		ptr = encode_int(encodeAC(ac[i * 4 + 0], ac[i * 4 + 1], ac[i * 4 + 2], maximumValue), 2, ptr);
 	}
 
 	*ptr = 0;
@@ -102,23 +97,40 @@ const char *blurHashForPixels(int xComponents, int yComponents, int width, int h
 }
 
 static void multiplyBasisFunction(
-	struct RGB *factors, int factorsCount, int width, int height, uint8_t *rgb, size_t bytesPerRow,
+	float factors[][4], int factorsCount, int width, int height, uint8_t *rgb, size_t bytesPerRow,
 	float *cosX, float *cosY
 ) {
 	for(int y = 0; y < height; y++) {
 		uint8_t *src = rgb + y * bytesPerRow;
 		float *cosYLocal = cosY + y * factorsCount;
-		for(int x = 0; x < width; x++) {
-			float pixel[3];
+		int x = 0;
+		for(; x < width - 3; x += 4) {
+			float *cosXLocal = cosX + x * factorsCount;
+			float pixel0[4] = {sRGBToLinear_cache[src[3 * (x+0) + 0]], sRGBToLinear_cache[src[3 * (x+0) + 1]], sRGBToLinear_cache[src[3 * (x+0) + 2]]};
+			float pixel1[4] = {sRGBToLinear_cache[src[3 * (x+1) + 0]], sRGBToLinear_cache[src[3 * (x+1) + 1]], sRGBToLinear_cache[src[3 * (x+1) + 2]]};
+			float pixel2[4] = {sRGBToLinear_cache[src[3 * (x+2) + 0]], sRGBToLinear_cache[src[3 * (x+2) + 1]], sRGBToLinear_cache[src[3 * (x+2) + 2]]};
+			float pixel3[4] = {sRGBToLinear_cache[src[3 * (x+3) + 0]], sRGBToLinear_cache[src[3 * (x+3) + 1]], sRGBToLinear_cache[src[3 * (x+3) + 2]]};
+			for (int i = 0; i < factorsCount; i++) {
+				float basis0 = cosYLocal[i] * cosXLocal[i + 0 * factorsCount];
+				float basis1 = cosYLocal[i] * cosXLocal[i + 1 * factorsCount];
+				float basis2 = cosYLocal[i] * cosXLocal[i + 2 * factorsCount];
+				float basis3 = cosYLocal[i] * cosXLocal[i + 3 * factorsCount];
+				factors[i][0] += basis0 * pixel0[0] + basis1 * pixel1[0] + basis2 * pixel2[0] + basis3 * pixel3[0];
+				factors[i][1] += basis0 * pixel0[1] + basis1 * pixel1[1] + basis2 * pixel2[1] + basis3 * pixel3[1];
+				factors[i][2] += basis0 * pixel0[2] + basis1 * pixel1[2] + basis2 * pixel2[2] + basis3 * pixel3[2];
+			}
+		}
+		for(; x < width; x++) {
+			float pixel[4];
 			float *cosXLocal = cosX + x * factorsCount;
 			pixel[0] = sRGBToLinear_cache[src[3 * x + 0]];
 			pixel[1] = sRGBToLinear_cache[src[3 * x + 1]];
 			pixel[2] = sRGBToLinear_cache[src[3 * x + 2]];
 			for (int i = 0; i < factorsCount; i++) {
 				float basis = cosYLocal[i] * cosXLocal[i];
-				factors[i].r += basis * pixel[0];
-				factors[i].g += basis * pixel[1];
-				factors[i].b += basis * pixel[2];
+				factors[i][0] += basis * pixel[0];
+				factors[i][1] += basis * pixel[1];
+				factors[i][2] += basis * pixel[2];
 			}
 		}
 	}
@@ -126,9 +138,9 @@ static void multiplyBasisFunction(
 	for (int i = 0; i < factorsCount; i++) {
 		float normalisation = (i == 0) ? 1 : 2;
 		float scale = normalisation / (width * height);
-		factors[i].r *= scale;
-		factors[i].g *= scale;
-		factors[i].b *= scale;
+		factors[i][0] *= scale;
+		factors[i][1] *= scale;
+		factors[i][2] *= scale;
 	}
 }
 
