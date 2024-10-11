@@ -26,7 +26,6 @@ setup(
     install_requires=[
         'cffi',
         'Pillow',
-        'six',
     ],
     setup_requires=[
         'cffi',

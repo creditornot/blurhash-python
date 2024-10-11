@@ -1,49 +1,70 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <math.h>
 
 #include "common.h"
 
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
 
-struct RGB {
-	float r;
-	float g;
-	float b;
-};
-
-static struct RGB multiplyBasisFunction(int xComponent, int yComponent, int width, int height, uint8_t *rgb, size_t bytesPerRow);
+static void multiplyBasisFunction(
+	float factors[][4], int factorsCount, int width, int height, uint8_t *rgb, size_t bytesPerRow,
+	float *cosX, float *cosY);
 static char *encode_int(int value, int length, char *destination);
 
 static int encodeDC(float r, float g, float b);
 static int encodeAC(float r, float g, float b, float maximumValue);
 
+float *sRGBToLinear_cache = NULL;
+
+static void init_sRGBToLinear_cache() {
+	if (sRGBToLinear_cache != NULL) {
+		return;
+	}
+	sRGBToLinear_cache = (float *)malloc(sizeof(float) * 256);
+	for (int x = 0; x < 256; x++) {
+		sRGBToLinear_cache[x] = sRGBToLinear(x);
+	}
+}
+
 const char *blurHashForPixels(int xComponents, int yComponents, int width, int height, uint8_t *rgb, size_t bytesPerRow, char *destination) {
 	if(xComponents < 1 || xComponents > 9) return NULL;
 	if(yComponents < 1 || yComponents > 9) return NULL;
 
-#ifndef _MSC_VER
-	float factors[yComponents * xComponents][3];
-#else
-	float factors[9 * 9][3];
-#endif
+	float factors[yComponents * xComponents][4];
+	int factorsCount = xComponents * yComponents;
 	memset(factors, 0, sizeof(factors));
 
-	for(int y = 0; y < yComponents; y++) {
+	init_sRGBToLinear_cache();
+
+	float *cosX = (float *)malloc(sizeof(float) * width * factorsCount);
+	if (! cosX) return NULL;
+	float *cosY = (float *)malloc(sizeof(float) * height * factorsCount);
+	if (! cosY) {
+		free(cosX);
+		return NULL;
+	}
+	for(int i = 0; i < width; i++) {
 		for(int x = 0; x < xComponents; x++) {
-			struct RGB factor = multiplyBasisFunction(x, y, width, height, rgb, bytesPerRow);
-			factors[y * xComponents + x][0] = factor.r;
-			factors[y * xComponents + x][1] = factor.g;
-			factors[y * xComponents + x][2] = factor.b;
+			float weight = cosf(M_PI * x * i / width);
+			for(int y = 0; y < yComponents; y++) {
+				cosX[i * factorsCount + y * xComponents + x] = weight;
+			}
 		}
 	}
+	for(int i = 0; i < height; i++) {
+		for(int y = 0; y < yComponents; y++) {
+			float weight = cosf(M_PI * y * i / height);
+			for(int x = 0; x < xComponents; x++) {
+				cosY[i * factorsCount + y * xComponents + x] = weight;
+			}
+		}
+	}
+	multiplyBasisFunction(factors, factorsCount, width, height, rgb, bytesPerRow, cosX, cosY);
+	free(cosX);
+	free(cosY);
 
 	float *dc = factors[0];
-	float *ac = dc + 3;
-	int acCount = xComponents * yComponents - 1;
+	float *ac = dc + 4;
+	int acCount = factorsCount - 1;
 	char *ptr = destination;
 
 	int sizeFlag = (xComponents - 1) + (yComponents - 1) * 9;
@@ -52,7 +73,7 @@ const char *blurHashForPixels(int xComponents, int yComponents, int width, int h
 	float maximumValue;
 	if(acCount > 0) {
 		float actualMaximumValue = 0;
-		for(int i = 0; i < acCount * 3; i++) {
+		for(int i = 0; i < acCount * 4; i++) {
 			actualMaximumValue = fmaxf(fabsf(ac[i]), actualMaximumValue);
 		}
 
@@ -67,7 +88,7 @@ const char *blurHashForPixels(int xComponents, int yComponents, int width, int h
 	ptr = encode_int(encodeDC(dc[0], dc[1], dc[2]), 4, ptr);
 
 	for(int i = 0; i < acCount; i++) {
-		ptr = encode_int(encodeAC(ac[i * 3 + 0], ac[i * 3 + 1], ac[i * 3 + 2], maximumValue), 2, ptr);
+		ptr = encode_int(encodeAC(ac[i * 4 + 0], ac[i * 4 + 1], ac[i * 4 + 2], maximumValue), 2, ptr);
 	}
 
 	*ptr = 0;
@@ -75,26 +96,52 @@ const char *blurHashForPixels(int xComponents, int yComponents, int width, int h
 	return destination;
 }
 
-static struct RGB multiplyBasisFunction(int xComponent, int yComponent, int width, int height, uint8_t *rgb, size_t bytesPerRow) {
-	struct RGB result = { 0, 0, 0 };
-	float normalisation = (xComponent == 0 && yComponent == 0) ? 1 : 2;
-
+static void multiplyBasisFunction(
+	float factors[][4], int factorsCount, int width, int height, uint8_t *rgb, size_t bytesPerRow,
+	float *cosX, float *cosY
+) {
 	for(int y = 0; y < height; y++) {
-		for(int x = 0; x < width; x++) {
-			float basis = cosf(M_PI * xComponent * x / width) * cosf(M_PI * yComponent * y / height);
-			result.r += basis * sRGBToLinear(rgb[3 * x + 0 + y * bytesPerRow]);
-			result.g += basis * sRGBToLinear(rgb[3 * x + 1 + y * bytesPerRow]);
-			result.b += basis * sRGBToLinear(rgb[3 * x + 2 + y * bytesPerRow]);
+		uint8_t *src = rgb + y * bytesPerRow;
+		float *cosYLocal = cosY + y * factorsCount;
+		int x = 0;
+		for(; x < width - 3; x += 4) {
+			float *cosXLocal = cosX + x * factorsCount;
+			float pixel0[4] = {sRGBToLinear_cache[src[3 * (x+0) + 0]], sRGBToLinear_cache[src[3 * (x+0) + 1]], sRGBToLinear_cache[src[3 * (x+0) + 2]]};
+			float pixel1[4] = {sRGBToLinear_cache[src[3 * (x+1) + 0]], sRGBToLinear_cache[src[3 * (x+1) + 1]], sRGBToLinear_cache[src[3 * (x+1) + 2]]};
+			float pixel2[4] = {sRGBToLinear_cache[src[3 * (x+2) + 0]], sRGBToLinear_cache[src[3 * (x+2) + 1]], sRGBToLinear_cache[src[3 * (x+2) + 2]]};
+			float pixel3[4] = {sRGBToLinear_cache[src[3 * (x+3) + 0]], sRGBToLinear_cache[src[3 * (x+3) + 1]], sRGBToLinear_cache[src[3 * (x+3) + 2]]};
+			for (int i = 0; i < factorsCount; i++) {
+				float basis0 = cosYLocal[i] * cosXLocal[i + 0 * factorsCount];
+				float basis1 = cosYLocal[i] * cosXLocal[i + 1 * factorsCount];
+				float basis2 = cosYLocal[i] * cosXLocal[i + 2 * factorsCount];
+				float basis3 = cosYLocal[i] * cosXLocal[i + 3 * factorsCount];
+				factors[i][0] += basis0 * pixel0[0] + basis1 * pixel1[0] + basis2 * pixel2[0] + basis3 * pixel3[0];
+				factors[i][1] += basis0 * pixel0[1] + basis1 * pixel1[1] + basis2 * pixel2[1] + basis3 * pixel3[1];
+				factors[i][2] += basis0 * pixel0[2] + basis1 * pixel1[2] + basis2 * pixel2[2] + basis3 * pixel3[2];
+			}
+		}
+		for(; x < width; x++) {
+			float pixel[4];
+			float *cosXLocal = cosX + x * factorsCount;
+			pixel[0] = sRGBToLinear_cache[src[3 * x + 0]];
+			pixel[1] = sRGBToLinear_cache[src[3 * x + 1]];
+			pixel[2] = sRGBToLinear_cache[src[3 * x + 2]];
+			for (int i = 0; i < factorsCount; i++) {
+				float basis = cosYLocal[i] * cosXLocal[i];
+				factors[i][0] += basis * pixel[0];
+				factors[i][1] += basis * pixel[1];
+				factors[i][2] += basis * pixel[2];
+			}
 		}
 	}
 
-	float scale = normalisation / (width * height);
-
-	result.r *= scale;
-	result.g *= scale;
-	result.b *= scale;
-
-	return result;
+	for (int i = 0; i < factorsCount; i++) {
+		float normalisation = (i == 0) ? 1 : 2;
+		float scale = normalisation / (width * height);
+		factors[i][0] *= scale;
+		factors[i][1] *= scale;
+		factors[i][2] *= scale;
+	}
 }
 
 static int encodeDC(float r, float g, float b) {
